@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+func main() {
+	//
+}
+
 // Download and save a PDF file from a given URL
 func downloadPDF(finalURL, outputDir string) {
 	filename := strings.ToLower(urlToSafeFilename(finalURL)) // Generate a safe filename
