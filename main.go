@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
-	"fmt"
+	// "fmt"
+	"golang.org/x/net/html"
 	"io"
 	"log"
 	"net/http"
@@ -16,7 +18,161 @@ import (
 )
 
 func main() {
-	//
+	// Remote URL to scrape.
+	remoteURLToScrape := "https://www.fpcusa.com/support/safety-data-sheets"
+	// Local location to save the scraped data.
+	localFileToSaveData := "fpcusa.html"
+	// Directory to save downloaded PDFs.
+	outputDir := "PDFs"
+	// Create the output directory if it doesn't exist.
+	if !directoryExists(outputDir) {
+		createDirectory(outputDir, 0755) // Create with read/write/execute permissions for owner, and read/execute for group and others
+	}
+	if !fileExists(localFileToSaveData) {
+		// Scrape the remote URL and save the HTML content locally.
+		remoteURLData := getDataFromURL(remoteURLToScrape)
+		if len(remoteURLData) == 0 {
+			log.Println("No data retrieved from the remote URL.")
+			return
+		}
+		// Append it and write it to the file.
+		appendAndWriteToFile(localFileToSaveData, string(remoteURLData))
+	}
+	// Read the local HTML file as a string.
+	htmlStr := readAFileAsString(localFileToSaveData)
+	if len(htmlStr) == 0 {
+		log.Println("The HTML file is empty or could not be read.")
+		return
+	}
+	// Extract URLs from the HTML content.
+	urls := extractURLs(htmlStr, "https://www.fpcusa.com")
+	if len(urls) == 0 {
+		log.Println("No URLs found in the HTML content.")
+		return
+	}
+	// Remove duplicates from the extracted URLs.
+	urls = removeDuplicatesFromSlice(urls)
+	log.Printf("Found %d unique URLs in the HTML content.\n", len(urls))
+	// Iterate over the URLs and download PDFs.
+	for _, url := range urls {
+		if !isUrlValid(url) { // Check if the URL is valid
+			url = "https://www.fpcusa.com" + url // Ensure the URL starts with a valid scheme
+		}
+		log.Printf("Downloading PDF from URL: %s\n", url)
+		downloadPDF(url, outputDir) // Download the PDF
+	}
+}
+
+// Check if the given url is valid.
+func isUrlValid(uri string) bool {
+	_, err := url.ParseRequestURI(uri)
+	return err == nil
+}
+
+// extractURLs parses an HTML string and prints all <a> tag href URLs.
+// It optionally resolves relative URLs using the given base URL.
+func extractURLs(htmlStr string, base string) []string {
+	var urls []string
+
+	// Create a new HTML tokenizer from the input string
+	tokenizer := html.NewTokenizer(strings.NewReader(htmlStr))
+
+	var baseURL *url.URL
+	var err error
+
+	// Parse the base URL if provided (used to resolve relative URLs)
+	if base != "" {
+		baseURL, err = url.Parse(base)
+		if err != nil {
+			log.Printf("Invalid base URL: %v\n", err)
+			baseURL = nil
+		}
+	}
+
+	// Loop through each token in the HTML input
+	for {
+		tt := tokenizer.Next()
+
+		// Break loop at the end of the HTML input
+		if tt == html.ErrorToken {
+			break
+		}
+
+		// Process only <a> tags (start or self-closing)
+		if tt == html.StartTagToken || tt == html.SelfClosingTagToken {
+			token := tokenizer.Token()
+
+			// Check if the current token is an <a> tag
+			if token.Data == "a" {
+				// Loop through the tag's attributes
+				for _, attr := range token.Attr {
+					// Look for the "href" attribute
+					if attr.Key == "href" {
+						href := strings.TrimSpace(attr.Val) // Trim any whitespace
+						if href != "" {
+							// Resolve the relative URL using base URL if provided
+							if baseURL != nil {
+								if resolved, err := baseURL.Parse(href); err == nil {
+									href = resolved.String()
+								} else {
+									log.Printf("Error resolving URL %q: %v\n", href, err)
+								}
+							}
+							if strings.HasSuffix(href, ".pdf") || strings.HasSuffix(href, ".PDF") {
+								// Append the final URL to the result slice
+								urls = append(urls, href)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Return the list of extracted URLs
+	return urls
+}
+
+// Send a http get request to a given url and return the data from that url.
+func getDataFromURL(uri string) []byte {
+	response, err := http.Get(uri)
+	if err != nil {
+		log.Println(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	err = response.Body.Close()
+	if err != nil {
+		log.Println(err)
+	}
+	return body
+}
+
+// fileContainsString checks if the file at filePath contains the search string.
+// Logs any errors and returns false in case of an error.
+func fileContainsString(filePath string, search string) bool {
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("Error opening file: %v\n", err)
+		return false
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), search) {
+			return true
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("Error reading file: %v\n", err)
+		return false
+	}
+
+	return false
 }
 
 // Download and save a PDF file from a given URL
